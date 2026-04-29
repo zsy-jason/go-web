@@ -60,6 +60,7 @@ export interface ExamplePreviewProps {
   designHeight?: number;
   fitThresholdScale?: number;
   fitMinScale?: number;
+  fit?: 'contain' | 'cover' | 'auto';
   /**
    * Override the default preview tab for this instance.
    * Takes precedence over the site-level `GoConfig.defaultTab`.
@@ -111,12 +112,13 @@ export const ExamplePreview = (props: ExamplePreviewProps) => {
     langAlias,
     defaultTab: propsDefaultTab,
     mode = 'linked',
-    webPreviewMode = 'auto',
+    webPreviewMode = 'responsive',
     webPreview = true,
     designWidth = 375,
     designHeight = 812,
     fitThresholdScale = 1.0,
-    fitMinScale = 0.6,
+    fitMinScale = 0.5,
+    fit = 'cover',
   } = props;
 
   // Instance prop > config provider > undefined (let ExampleContent decide)
@@ -277,6 +279,7 @@ export const ExamplePreview = (props: ExamplePreviewProps) => {
       designHeight={designHeight}
       fitThresholdScale={fitThresholdScale}
       fitMinScale={fitMinScale}
+      fit={fit}
     />
   );
 };
