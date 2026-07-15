@@ -3,27 +3,38 @@ import {
   Button,
   Radio,
   RadioGroup,
+  Select,
   SideSheet,
   Space,
   Switch,
   TabPane,
   Tabs,
+  Toast,
   Typography,
 } from '@douyinfe/semi-ui';
+import { QRCodeSVG } from 'qrcode.react';
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { CopyToClipboard } from 'react-copy-to-clipboard';
 import { CodeView } from './code-view';
 import { FileTree } from './file-tree';
-import { OpenInPanel } from './open-in-panel';
+import { DeepLinkRow, FloatingDeepLink, OpenInHint } from './open-in-panel';
 import { PreviewImg } from './preview-img';
 import { SplitPane, type SplitPaneHandle } from './split-pane';
+import { SwitchSchema } from './switch-schema';
 
 import type { PreviewTab } from '../../config';
 import { DEFAULT_I18N, DefaultNoSSR, useGoConfig } from '../../config';
 import { useIsMobile } from '../hooks/use-is-mobile';
 import type { SchemaOptionsData } from '../hooks/use-switch-schema';
 import { useTreeController } from '../hooks/use-tree-controller';
-import { IconExitFullscreen, IconFullscreen, IconGithub } from '../utils/icon';
-import { resolveOpenInVariant } from '../utils/open-in-mode';
+import {
+  IconCopyLink,
+  IconExitFullscreen,
+  IconFullscreen,
+  IconGithub,
+} from '../utils/icon';
+import { getFrameworkConfig } from '../utils/native-frameworks';
+import { isQrAllowed, resolveOpenIn } from '../utils/open-in-mode';
 import type { WebPreviewMode } from '../utils/resolve-web-preview';
 import { tabScrollToTop } from '../utils/tool';
 
@@ -213,40 +224,60 @@ export function ExampleContent({
   const onSwitchSchema = (schema: string) => {
     setQrcodeUrlWithSchema(schema);
   };
-  const qrcodeUrl = qrcodeUrlWithSchema || currentEntryFileUrl;
+  // Deep-link template: an explicit `deepLinkUrl` prop overrides the framework's
+  // default scheme (e.g. lynxtron → lynxtron-go://…). Universal bundles have no
+  // default, so they only offer a deep link when one is passed explicitly.
+  const frameworkConfig = getFrameworkConfig(nativeFramework);
+  const deepLinkTemplate = deepLinkUrl || frameworkConfig?.deepLinkScheme || '';
+
   const resolvedDeepLinkUrl = useMemo(() => {
-    if (!deepLinkUrl) return '';
-    return deepLinkUrl
+    if (!deepLinkTemplate) return '';
+    const url = deepLinkTemplate
       .split('{{{urlEncoded}}}')
       .join(encodeURIComponent(currentEntryFileUrl))
       .split('{{{url}}}')
       .join(currentEntryFileUrl);
-  }, [deepLinkUrl, currentEntryFileUrl]);
+    // Drop dangerous schemes so a config-supplied deep link can't execute
+    // in-page when clicked (e.g. `javascript:` / `data:` / `vbscript:`).
+    if (/^\s*(javascript|data|vbscript):/i.test(url)) return '';
+    return url;
+  }, [deepLinkTemplate, currentEntryFileUrl]);
   const canOpenDeepLink = useMemo(() => {
-    if (!deepLinkUrl) return false;
+    if (!deepLinkTemplate) return false;
     const needsUrl =
-      deepLinkUrl.includes('{{{url}}}') ||
-      deepLinkUrl.includes('{{{urlEncoded}}}');
+      deepLinkTemplate.includes('{{{url}}}') ||
+      deepLinkTemplate.includes('{{{urlEncoded}}}');
     return needsUrl ? Boolean(currentEntryFileUrl) : true;
-  }, [deepLinkUrl, currentEntryFileUrl]);
+  }, [deepLinkTemplate, currentEntryFileUrl]);
 
-  // OpenIn variant resolution
+  // The QR encodes the entry URL for universal bundles (Lynx Explorer picks it
+  // up), or the resolved deep link for a framework (scanning opens that app).
+  const qrcodeUrl = nativeFramework
+    ? resolvedDeepLinkUrl
+    : qrcodeUrlWithSchema || currentEntryFileUrl;
+
   const isMobileUA = useIsMobile();
   const isMobile = _forceMobile ?? isMobileUA;
-  const openInVariant = useMemo(
+
+  // `qrAllowed` is synchronous (depends only on `nativeFramework`), so a
+  // universal bundle never transiently loses its QR tab before the entry loads.
+  const qrAllowed = isQrAllowed(nativeFramework);
+  const plan = useMemo(
     () =>
-      resolveOpenInVariant({
+      resolveOpenIn({
         nativeFramework,
         isMobile,
-        hasDeepLink: Boolean(deepLinkUrl),
+        hasDeepLink: Boolean(deepLinkTemplate),
         hasEntry: Boolean(currentEntry),
       }),
-    [nativeFramework, isMobile, deepLinkUrl, currentEntry],
+    [nativeFramework, isMobile, deepLinkTemplate, currentEntry],
   );
 
-  // Redirect away from QRCode tab if it's hidden
+  // Redirect away from the QR tab when the framework never offers one (a
+  // desktop framework like Lynxtron). Gated on the synchronous `qrAllowed`, not
+  // the async entry state, so a universal bundle keeps its QR tab while loading.
   useEffect(() => {
-    if (previewType === PreviewType.QRCode && openInVariant !== 'tab') {
+    if (previewType === PreviewType.QRCode && !qrAllowed) {
       setPreviewType(
         previewImage
           ? PreviewType.Preview
@@ -255,7 +286,33 @@ export function ExampleContent({
             : PreviewType.Preview,
       );
     }
-  }, [openInVariant]);
+  }, [qrAllowed]);
+
+  // Non-QR "open" surface for desktop frameworks: the floating deep link
+  // (desktop) or the "open on desktop" hint (mobile).
+  const renderOpenIn = () => {
+    if (qrAllowed) return null;
+    if (plan.showDeepLink) {
+      return (
+        <FloatingDeepLink
+          resolvedDeepLinkUrl={resolvedDeepLinkUrl}
+          canOpenDeepLink={canOpenDeepLink}
+          nativeFramework={nativeFramework}
+          t={t}
+        />
+      );
+    }
+    if (plan.hintPlatform) {
+      return (
+        <OpenInHint
+          nativeFramework={nativeFramework}
+          platform={plan.hintPlatform}
+          t={t}
+        />
+      );
+    }
+    return null;
+  };
 
   const showCodeTab = entryData && entryData?.length > 1;
 
@@ -309,10 +366,7 @@ export function ExampleContent({
           />
         </div>
       </div>
-      {openInVariant === 'floating-toast' &&
-        (mode === 'source' || !hasPreview || !showPreview) && (
-          <OpenInPanel variant="floating-toast" {...openInPanelProps} />
-        )}
+      {(mode === 'source' || !hasPreview || !showPreview) && renderOpenIn()}
     </div>
   );
 
@@ -321,37 +375,20 @@ export function ExampleContent({
       [
         Boolean(previewImage),
         Boolean(hasWebPreview),
-        Boolean(currentEntry) && openInVariant === 'tab',
+        Boolean(currentEntry) && qrAllowed,
       ].filter(Boolean).length,
-    [previewImage, hasWebPreview, currentEntry, openInVariant],
+    [previewImage, hasWebPreview, currentEntry, qrAllowed],
   );
-
-  const openInPanelProps = {
-    qrcodeUrl,
-    currentEntry,
-    entryFiles,
-    setCurrentEntry,
-    schemaOptions,
-    currentEntryFileUrl,
-    onSwitchSchema,
-    resolvedDeepLinkUrl,
-    canOpenDeepLink,
-    explorerUrl: withBaseFn(
-      lang === 'zh' ? LYNX_EXPLORER_URL_CN : LYNX_EXPLORER_URL_EN,
-    ),
-    lynxExplorerText,
-    hasEntry: Boolean(currentEntry),
-    nativeFramework,
-    t,
-    withBaseFn,
-  };
 
   const renderPreviewWrap = () => (
     <div className={s['preview-wrap']}>
       <div className={s['preview-wrap-content']}>
         <div className={s['preview-header']}>
           <div style={{ width: 24, flexShrink: 0 }} />
-          {/* Show tab switcher only if there are multiple preview options */}
+          {/* Show the tab switcher when there's at least one preview option.
+              A single option still renders it so the active tab stays
+              selectable (e.g. a web-only example whose previewType would
+              otherwise not match any visible panel). */}
           {previewOptionCount >= 1 ? (
             <RadioGroup
               onChange={(e) => setPreviewType(e.target.value)}
@@ -370,8 +407,8 @@ export function ExampleContent({
                     <Radio value={PreviewType.Preview}>{t('go.preview')}</Radio>
                   )}
                   {hasWebPreview && <Radio value={PreviewType.Web}>Web</Radio>}
-                  {currentEntry && openInVariant === 'tab' && (
-                    <Radio value={PreviewType.QRCode}>{t('go.openin')} ↗</Radio>
+                  {currentEntry && qrAllowed && (
+                    <Radio value={PreviewType.QRCode}>{t('go.qrcode')}</Radio>
                   )}
                 </>
               ) : (
@@ -409,13 +446,94 @@ export function ExampleContent({
           />
         </div>
         <div className={s['preview-body']}>
-          {previewType === PreviewType.QRCode &&
-            currentEntry &&
-            openInVariant === 'tab' && (
-              <div className={s['preview-panel']}>
-                <OpenInPanel variant="tab" {...openInPanelProps} />
+          {previewType === PreviewType.QRCode && currentEntry && qrAllowed && (
+            <div className={s['preview-panel']}>
+              <div className={s.qrcode}>
+                {/* Lynx-Explorer scan hint is universal-only; a framework QR
+                      opens that framework's own app when scanned. */}
+                {!nativeFramework && (
+                  <Typography.Text
+                    size="small"
+                    type="tertiary"
+                    style={{ margin: '28px 12px', textAlign: 'center' }}
+                  >
+                    {t('go.scan.message-1')}
+                    <Typography.Text
+                      link={{
+                        href: withBaseFn(
+                          lang === 'zh'
+                            ? LYNX_EXPLORER_URL_CN
+                            : LYNX_EXPLORER_URL_EN,
+                        ),
+                        target: '_blank',
+                      }}
+                      size="small"
+                      underline
+                    >
+                      {lynxExplorerText}
+                    </Typography.Text>{' '}
+                    {t('go.scan.message-2')}
+                  </Typography.Text>
+                )}
+                <div className={s['qrcode-svg']}>
+                  <QRCodeSVG value={qrcodeUrl} />
+                </div>
+                <div style={{ marginBottom: '32px' }}>
+                  <CopyToClipboard
+                    onCopy={() => {
+                      Toast.success(t('go.qrcode.copied'));
+                    }}
+                    text={qrcodeUrl}
+                  >
+                    <Button
+                      type="tertiary"
+                      style={{ fontSize: '12px' }}
+                      icon={<IconCopyLink style={{ fontSize: '16px' }} />}
+                    >
+                      {t('go.qrcode.copy-link')}
+                    </Button>
+                  </CopyToClipboard>
+                </div>
+                {!nativeFramework && schemaOptions && (
+                  <SwitchSchema
+                    optionsData={schemaOptions}
+                    currentEntryFileUrl={currentEntryFileUrl}
+                    onSwitchSchema={onSwitchSchema}
+                  />
+                )}
+                <div className={s['qrcode-entry']}>
+                  <Typography.Text
+                    size="small"
+                    type="tertiary"
+                    style={{ marginRight: '12px', flexShrink: 0 }}
+                  >
+                    {t('go.qrcode.entry')}
+                  </Typography.Text>
+                  <Select
+                    style={{ width: '100%', maxWidth: '200px' }}
+                    value={currentEntry}
+                    onChange={(v) => setCurrentEntry(v as string)}
+                  >
+                    {entryFiles?.map((file) => (
+                      <Select.Option key={file.name} value={file.name}>
+                        {file.name}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </div>
+                {/* Additive deep link, only when the plan offers one here
+                      (universal + configured, or sparkling on mobile). */}
+                {plan.showDeepLink && (
+                  <DeepLinkRow
+                    resolvedDeepLinkUrl={resolvedDeepLinkUrl}
+                    canOpenDeepLink={canOpenDeepLink}
+                    nativeFramework={nativeFramework}
+                    t={t}
+                  />
+                )}
               </div>
-            )}
+            </div>
+          )}
           {previewImage && (
             <div
               className={s['preview-panel']}
@@ -461,12 +579,9 @@ export function ExampleContent({
             </div>
           )}
         </div>
-        {openInVariant === 'floating-toast' && (
-          <OpenInPanel variant="floating-toast" {...openInPanelProps} />
-        )}
-        {openInVariant === 'bottom-sheet' && (
-          <OpenInPanel variant="bottom-sheet" {...openInPanelProps} />
-        )}
+        {/* Only in the visible preview pane — renderCodeWrap() renders it when
+            the preview is hidden, so the two never render at once. */}
+        {showPreview && renderOpenIn()}
       </div>
     </div>
   );

@@ -37,7 +37,9 @@ const translations: Record<string, Record<string, string>> = {
     'go.deeplink.open.default': 'Open in Lynx Explorer',
     'go.deeplink.open.lynxtron': 'Open in Lynxtron Go',
     'go.deeplink.open.sparkling': 'Open in Sparkling',
-    'go.deeplink.hint-desktop': 'Open on desktop',
+    'go.deeplink.hint-desktop': 'desktop only',
+    'go.deeplink.hint-mobile': 'mobile only',
+    'go.deeplink.or': 'or',
     'go.openin.show-qrcode': 'Show QR Code',
   },
   zh: {
@@ -53,7 +55,9 @@ const translations: Record<string, Record<string, string>> = {
     'go.deeplink.open.default': '在 Lynx Explorer 中打开',
     'go.deeplink.open.lynxtron': '在 Lynxtron Go 中打开',
     'go.deeplink.open.sparkling': '在 Sparkling 中打开',
-    'go.deeplink.hint-desktop': '在桌面上打开',
+    'go.deeplink.hint-desktop': '仅桌面',
+    'go.deeplink.hint-mobile': '仅移动端',
+    'go.deeplink.or': '或',
     'go.openin.show-qrcode': '显示二维码',
   },
 };
@@ -369,6 +373,172 @@ const panelInputStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
+// Preset (nativeFramework, deepLinkUrl) combinations for the deep-link / QR
+// surface, so the different permutations can be loaded with one click.
+const DEEPLINK_PRESETS: {
+  label: string;
+  title: string;
+  deepLinkUrl: string;
+  nativeFramework: string;
+  defaultTab: PreviewTab;
+}[] = [
+  {
+    label: 'Universal',
+    title: 'Runs anywhere · no deepLink → QR on both desktop and mobile',
+    deepLinkUrl: '',
+    nativeFramework: '',
+    defaultTab: 'qrcode',
+  },
+  {
+    label: 'Universal + Deep Link',
+    title:
+      'Runs anywhere · deepLink → QR + additive “or / Open in …” on both platforms',
+    deepLinkUrl: 'lynx-explorer://open?url={{{urlEncoded}}}',
+    nativeFramework: '',
+    defaultTab: 'qrcode',
+  },
+  {
+    label: 'Lynxtron',
+    title:
+      'Desktop framework (default scheme) → deep link on desktop, hint on mobile',
+    deepLinkUrl: '',
+    nativeFramework: 'lynxtron',
+    defaultTab: 'qrcode',
+  },
+  {
+    label: 'Sparkling',
+    title:
+      'Mobile framework (default scheme) → QR on desktop, deep link + QR on mobile',
+    deepLinkUrl: '',
+    nativeFramework: 'sparkling',
+    defaultTab: 'qrcode',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// PanelSection — one props-panel column.
+//   Desktop: a fixed-width (or growing) column. Fixed-width columns fill the
+//     panel height via an absolutely-positioned scroller, so every column is as
+//     tall as the tallest (the growing controls column) instead of a fixed cap.
+//   Mobile: a collapsible section with a separator line, folded to save space.
+// ---------------------------------------------------------------------------
+
+function PanelSection({
+  title,
+  headerExtra,
+  isNarrow,
+  width,
+  grow,
+  defaultOpen = true,
+  bodyStyle,
+  children,
+}: {
+  title: string;
+  headerExtra?: React.ReactNode;
+  isNarrow: boolean;
+  width?: number;
+  grow?: boolean;
+  defaultOpen?: boolean;
+  bodyStyle?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  const header = (
+    <div
+      style={{
+        ...panelLabelStyle,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+    >
+      <span>{title}</span>
+      {headerExtra}
+    </div>
+  );
+
+  if (isNarrow) {
+    return (
+      <div style={{ width: '100%', borderTop: '1px solid var(--sb-border)' }}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '9px 16px',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            font: 'inherit',
+          }}
+        >
+          <span
+            style={{
+              color: 'var(--sb-text-dim)',
+              fontSize: 9,
+              transition: 'transform 0.15s',
+              transform: open ? 'rotate(90deg)' : 'none',
+            }}
+          >
+            ▶
+          </span>
+          <span style={panelLabelStyle}>{title}</span>
+          {headerExtra}
+        </button>
+        {open && (
+          <div style={{ padding: '0 16px 12px', ...bodyStyle }}>{children}</div>
+        )}
+      </div>
+    );
+  }
+
+  if (grow) {
+    return (
+      <div
+        style={{
+          flex: '1 1 0',
+          minWidth: 120,
+          padding: '10px 16px',
+          overflow: 'hidden',
+          ...bodyStyle,
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: `0 0 ${width}px`, position: 'relative', minHeight: 0 }}>
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          overflow: 'auto',
+          padding: '10px 12px',
+        }}
+      >
+        <div
+          style={{
+            position: 'sticky',
+            top: 0,
+            background: 'var(--sb-bg)',
+            paddingBottom: 4,
+            zIndex: 1,
+          }}
+        >
+          {header}
+        </div>
+        <div style={bodyStyle}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Column Resizer (Finder-style drag handle between columns)
 // ---------------------------------------------------------------------------
@@ -524,6 +694,10 @@ function findEntrySourceDir(
 function App() {
   const initial = useMemo(() => readUrlState(), []);
 
+  // On narrow screens the multi-column props panel stacks vertically instead of
+  // scrolling sideways, so every control (inputs, presets) stays reachable.
+  const isNarrow = useIsMobile();
+
   const [lang, setLang] = useState<Lang>(initial.lang ?? 'en');
   const [dark, setDark] = useState(
     () =>
@@ -558,6 +732,12 @@ function App() {
   const [deepLinkUrl, setDeepLinkUrl] = useState('');
   const [nativeFramework, setNativeFramework] = useState<string>('');
   const [propsOpen, setPropsOpen] = useState(true);
+
+  // Which preset (if any) the current props match — drives the compact select.
+  const activePreset = DEEPLINK_PRESETS.find(
+    (p) =>
+      p.deepLinkUrl === deepLinkUrl && p.nativeFramework === nativeFramework,
+  );
   const [ssgOpen, setSsgOpen] = useState(false);
   const [jsxDialogOpen, setJsxDialogOpen] = useState(false);
   const [jsxCopied, setJsxCopied] = useState(false);
@@ -917,32 +1097,18 @@ function App() {
               borderTop: '1px solid var(--sb-border)',
               background: 'var(--sb-bg)',
               display: 'flex',
-              overflowX: 'auto',
+              flexDirection: isNarrow ? 'column' : 'row',
+              overflowX: isNarrow ? 'visible' : 'auto',
             }}
           >
             {/* Col 1: examples list */}
-            <div
-              style={{
-                flex: `0 0 ${col1W}px`,
-                padding: '10px 12px',
-                overflow: 'auto',
-                maxHeight: 200,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-              }}
-            >
-              <div
-                style={{
-                  ...panelLabelStyle,
-                  padding: '0 4px',
-                  marginBottom: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <span>Examples</span>
+            <PanelSection
+              title="Examples"
+              isNarrow={isNarrow}
+              width={col1W}
+              defaultOpen={false}
+              bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 1 }}
+              headerExtra={
                 <input
                   type="text"
                   value={exampleSearch}
@@ -961,7 +1127,8 @@ function App() {
                     minWidth: 0,
                   }}
                 />
-              </div>
+              }
+            >
               {EXAMPLES.filter(
                 (name) =>
                   !exampleSearch ||
@@ -1018,33 +1185,20 @@ function App() {
                   </button>
                 );
               })}
-            </div>
+            </PanelSection>
 
-            <ColumnResizer widthRef={col1Ref} onWidthChange={setCol1} />
+            {!isNarrow && (
+              <ColumnResizer widthRef={col1Ref} onWidthChange={setCol1} />
+            )}
 
             {/* Col 2: entry list */}
-            <div
-              style={{
-                flex: `0 0 ${col2W}px`,
-                padding: '10px 12px',
-                overflow: 'auto',
-                maxHeight: 200,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 1,
-              }}
-            >
-              <div
-                style={{
-                  ...panelLabelStyle,
-                  padding: '0 4px',
-                  marginBottom: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <span>Entries</span>
+            <PanelSection
+              title="Entries"
+              isNarrow={isNarrow}
+              width={col2W}
+              defaultOpen={false}
+              bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 1 }}
+              headerExtra={
                 <input
                   type="text"
                   value={entrySearch}
@@ -1063,7 +1217,8 @@ function App() {
                     minWidth: 0,
                   }}
                 />
-              </div>
+              }
+            >
               {metadata?.templateFiles
                 ?.filter(
                   (t: any) =>
@@ -1111,17 +1266,19 @@ function App() {
                   {metadataLoading ? 'Loading…' : '—'}
                 </span>
               )}
-            </div>
+            </PanelSection>
 
-            <ColumnResizer widthRef={col2Ref} onWidthChange={setCol2} />
+            {!isNarrow && (
+              <ColumnResizer widthRef={col2Ref} onWidthChange={setCol2} />
+            )}
 
             {/* Col 3: controls */}
-            <div
-              style={{
-                flex: '1 1 0',
-                minWidth: 120,
-                padding: '10px 16px',
-                overflow: 'hidden',
+            <PanelSection
+              title="Props"
+              isNarrow={isNarrow}
+              grow
+              defaultOpen
+              bodyStyle={{
                 display: 'grid',
                 gridTemplateColumns: 'auto 1fr',
                 gap: '5px 10px',
@@ -1193,6 +1350,30 @@ function App() {
                 placeholder="lynx://..."
               />
 
+              <span style={panelLabelStyle}>Presets</span>
+              <select
+                aria-label="Preset"
+                value={activePreset?.label ?? ''}
+                title={activePreset?.title}
+                onChange={(e) => {
+                  const p = DEEPLINK_PRESETS.find(
+                    (x) => x.label === e.target.value,
+                  );
+                  if (!p) return;
+                  setDeepLinkUrl(p.deepLinkUrl);
+                  setNativeFramework(p.nativeFramework);
+                  setDefaultTab(p.defaultTab);
+                }}
+                style={{ ...selectStyle, width: 'auto', maxWidth: '100%' }}
+              >
+                {!activePreset && <option value="">Custom…</option>}
+                {DEEPLINK_PRESETS.map((p) => (
+                  <option key={p.label} value={p.label}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+
               <span style={panelLabelStyle}>Deep Link</span>
               <input
                 type="text"
@@ -1210,59 +1391,55 @@ function App() {
                 style={panelInputStyle}
                 placeholder="lynxtron / sparkling / (empty = universal)"
               />
-            </div>
+            </PanelSection>
 
-            <ColumnResizer widthRef={col4Ref} onWidthChange={setCol4} reverse />
+            {!isNarrow && (
+              <ColumnResizer
+                widthRef={col4Ref}
+                onWidthChange={setCol4}
+                reverse
+              />
+            )}
 
             {/* Right: metadata JSON */}
-            <div
-              style={{
-                flex: `0 0 ${col4W}px`,
-                minWidth: 0,
-                padding: '10px 16px',
-                overflow: 'auto',
-                maxHeight: 200,
-              }}
+            <PanelSection
+              title="Metadata"
+              isNarrow={isNarrow}
+              width={col4W}
+              defaultOpen={false}
+              headerExtra={
+                <>
+                  {metadata?.version && (
+                    <span className="example-tag example-tag-version">
+                      {metadata.version}
+                    </span>
+                  )}
+                  {metadata?.reactLynxVersion && (
+                    <span className="example-tag example-tag-react">
+                      react {metadata.reactLynxVersion}
+                    </span>
+                  )}
+                  {metadata?.vueLynxVersion && (
+                    <span className="example-tag example-tag-vue">
+                      vue-lynx {metadata.vueLynxVersion}
+                    </span>
+                  )}
+                  {metadata?.templateFiles?.length > 0 && (
+                    <span
+                      className={`example-tag ${
+                        metadata?.templateFiles?.some((t: any) => t.webFile)
+                          ? 'example-tag-web'
+                          : 'example-tag-no-web'
+                      }`}
+                    >
+                      {metadata?.templateFiles?.some((t: any) => t.webFile)
+                        ? 'Web'
+                        : 'No Web'}
+                    </span>
+                  )}
+                </>
+              }
             >
-              <div
-                style={{
-                  ...panelLabelStyle,
-                  marginBottom: 8,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                example-metadata.json
-                {metadata?.version && (
-                  <span className="example-tag example-tag-version">
-                    {metadata.version}
-                  </span>
-                )}
-                {metadata?.reactLynxVersion && (
-                  <span className="example-tag example-tag-react">
-                    react {metadata.reactLynxVersion}
-                  </span>
-                )}
-                {metadata?.vueLynxVersion && (
-                  <span className="example-tag example-tag-vue">
-                    vue-lynx {metadata.vueLynxVersion}
-                  </span>
-                )}
-                {metadata?.templateFiles?.length > 0 && (
-                  <span
-                    className={`example-tag ${
-                      metadata?.templateFiles?.some((t: any) => t.webFile)
-                        ? 'example-tag-web'
-                        : 'example-tag-no-web'
-                    }`}
-                  >
-                    {metadata?.templateFiles?.some((t: any) => t.webFile)
-                      ? 'Web'
-                      : 'No Web'}
-                  </span>
-                )}
-              </div>
               {metadataHtml ? (
                 <div
                   className="metadata-shiki"
@@ -1283,7 +1460,7 @@ function App() {
                   {metadataLoading ? 'Loading…' : 'No metadata'}
                 </pre>
               )}
-            </div>
+            </PanelSection>
           </div>
         )}
       </div>
