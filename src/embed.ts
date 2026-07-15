@@ -26,6 +26,23 @@ export type EmbedOptions = {
   mode?: 'linked' | 'preview' | 'source';
   /** Default preview tab */
   defaultTab?: 'preview' | 'web' | 'qrcode';
+  /**
+   * Deep link URL template for opening the app locally.
+   *
+   * Supports templating with the currently selected entry URL:
+   * - `{{{url}}}` - raw URL
+   * - `{{{urlEncoded}}}` - encodeURIComponent(URL)
+   */
+  deepLinkUrl?: string;
+  /**
+   * Native framework required by this bundle at runtime, e.g. `"lynxtron"` or
+   * `"sparkling"`. When unset, the bundle has no native framework dependency
+   * and runs on any Lynx-compatible host (Lynx Explorer, Lynxtron Go, ...).
+   *
+   * Drives the "Open in ..." button label + which host variants of the panel
+   * are rendered. Prop overrides `example-metadata.json`'s `nativeFramework`.
+   */
+  nativeFramework?: string;
   /** Static preview image URL */
   img?: string;
   /** Default entry file for web preview */

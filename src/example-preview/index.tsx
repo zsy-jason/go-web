@@ -70,6 +70,25 @@ export interface ExamplePreviewProps {
    * - `'qrcode'`  — QR code for Lynx Explorer
    */
   defaultTab?: PreviewTab;
+  /**
+   * Deep link URL template for opening the app locally.
+   *
+   * Supports templating with the currently selected entry URL:
+   * - `{{{url}}}` -- raw entry URL
+   * - `{{{urlEncoded}}}` -- `encodeURIComponent(entryUrl)`
+   *
+   * Example: `'lynxtron-go://open?url={{{urlEncoded}}}'`
+   */
+  deepLinkUrl?: string;
+  /**
+   * Native framework required by the bundle at runtime, e.g. `"lynxtron"` or
+   * `"sparkling"`. Unset ⇒ no native framework dependency, universally
+   * compatible (opens in Lynx Explorer by default). Prop overrides the value
+   * declared in `example-metadata.json`.
+   */
+  nativeFramework?: string;
+  /** @internal Force mobile mode for testing. */
+  _forceMobile?: boolean;
 }
 
 export interface ExampleMetadata {
@@ -82,6 +101,11 @@ export interface ExampleMetadata {
   }>;
   previewImage?: string;
   exampleGitBaseUrl?: string;
+  /**
+   * Native framework this example depends on at runtime (e.g. `"lynxtron"`).
+   * Absent means no native framework dep — universally compatible.
+   */
+  nativeFramework?: string;
 }
 
 export const ExamplePreview = (props: ExamplePreviewProps) => {
@@ -119,6 +143,9 @@ export const ExamplePreview = (props: ExamplePreviewProps) => {
     fitThresholdScale = 1.0,
     fitMinScale = 0.5,
     fit = 'cover',
+    deepLinkUrl,
+    nativeFramework: nativeFrameworkProp,
+    _forceMobile,
   } = props;
 
   // Instance prop > config provider > undefined (let ExampleContent decide)
@@ -198,6 +225,7 @@ export const ExamplePreview = (props: ExamplePreviewProps) => {
     }
     return '';
   }, [exampleData, currentEntry, schema]);
+
   useEffect(() => {
     if (exampleData?.templateFiles && exampleData?.templateFiles.length > 0) {
       let tmpEntry;
@@ -280,6 +308,9 @@ export const ExamplePreview = (props: ExamplePreviewProps) => {
       fitThresholdScale={fitThresholdScale}
       fitMinScale={fitMinScale}
       fit={fit}
+      deepLinkUrl={deepLinkUrl}
+      nativeFramework={nativeFrameworkProp ?? exampleData?.nativeFramework}
+      _forceMobile={_forceMobile}
     />
   );
 };
