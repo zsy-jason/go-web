@@ -33,6 +33,7 @@ import {
   IconFullscreen,
   IconGithub,
   IconOpenExternal,
+  IconRefresh,
 } from '../utils/icon';
 import { getFrameworkConfig } from '../utils/native-frameworks';
 import { isQrAllowed, resolveOpenIn } from '../utils/open-in-mode';
@@ -155,6 +156,10 @@ export function ExampleContent({
   const isUltra = fullscreenMode === 'ultra';
   const isUltraRef = useRef(false);
   isUltraRef.current = isUltra;
+  // Soft-refresh of the Web preview: remount <lynx-view> after the initial
+  // bundle download. Button stays hidden until WebIframe unlocks it.
+  const [webReloadKey, setWebReloadKey] = useState(0);
+  const [canRefreshWeb, setCanRefreshWeb] = useState(false);
 
   useEffect(() => {
     const el = boxRef.current;
@@ -499,6 +504,23 @@ export function ExampleContent({
               onClick={enterFrameless}
             />
           )}
+          {/* Soft refresh sits immediately beside fullscreen (same Button
+              size/theme). Only after the initial web bundle has downloaded. */}
+          {hasWebPreview &&
+            previewType === PreviewType.Web &&
+            canRefreshWeb && (
+              <Button
+                theme="borderless"
+                icon={
+                  <IconRefresh style={{ color: 'var(--semi-color-text-2)' }} />
+                }
+                type="tertiary"
+                size="small"
+                title={t('go.refresh')}
+                aria-label={t('go.refresh')}
+                onClick={() => setWebReloadKey((v) => v + 1)}
+              />
+            )}
           <Button
             theme="borderless"
             icon={
@@ -654,6 +676,8 @@ export function ExampleContent({
                     fitThresholdScale={fitThresholdScale}
                     fitMinScale={fitMinScale}
                     fit={fit}
+                    reloadKey={webReloadKey}
+                    onCanRefreshChange={setCanRefreshWeb}
                   />
                 </Suspense>
               </NoSSRComponent>
